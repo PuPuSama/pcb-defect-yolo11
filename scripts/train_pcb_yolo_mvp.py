@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from ultralytics import YOLO
@@ -60,6 +61,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def project_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return Path(os.environ.get("PWD", Path.cwd())) / path
+
 def write_manifest(save_dir: Path, args: argparse.Namespace, stats: ReplacementStats, dry_run: bool) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -87,7 +94,7 @@ def print_replacement_stats(stats: ReplacementStats) -> None:
 
 
 def train_overrides(args: argparse.Namespace) -> dict[str, object]:
-    project_dir = Path(args.project).resolve()
+    project_dir = project_path(args.project)
     return {
         "model": args.model,
         "data": args.data,
@@ -142,7 +149,7 @@ def train_injected_model(args: argparse.Namespace, target_names: set[str]) -> tu
 def main() -> int:
     args = parse_args()
     target_names = {item.strip() for item in args.target_csp_names.split(",") if item.strip()}
-    planned_save_dir = Path(args.project).resolve() / args.name
+    planned_save_dir = project_path(args.project) / args.name
 
     if args.dry_run:
         model = YOLO(args.model)
