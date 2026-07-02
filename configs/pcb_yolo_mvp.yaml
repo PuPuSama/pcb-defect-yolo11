@@ -1,0 +1,37 @@
+experiment: PCB-YOLO-MVP
+base_model: yolo11n.pt
+default_data: datasets/pcb-defect-yolo/pcb-defect.yaml
+recommended_data: datasets/pcb-defect-yolo-sliced-960-gray/pcb-defect-sliced.yaml
+
+preprocess:
+  grayscale: true
+  slice_size: 960
+  overlap: 0.25
+  min_visibility: 0.35
+  negative_ratio: 0.20
+
+model_modules:
+  conv_sws:
+    status: implemented
+    target: stride-2 Conv
+    sws_blocks: 2
+    simam_lambda: 0.0001
+  fbc2f:
+    status: implemented
+    target_csp_names:
+      - C2f
+      - C3k2
+    pconv_n_div: 4
+  nwd_iou:
+    status: planned
+    alpha: 0.5
+    constant_c: 16
+
+train:
+  imgsz: 960
+  epochs: 100
+  batch: 16
+  optimizer: SGD
+  lr0: 0.001
+  momentum: 0.9
+  weight_decay: 0.0005

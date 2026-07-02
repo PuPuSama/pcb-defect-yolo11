@@ -59,6 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-visibility", type=float, default=0.35)
     parser.add_argument("--min-box-size", type=float, default=2.0)
     parser.add_argument("--negative-ratio", type=float, default=0.20)
+    parser.add_argument(
+        "--grayscale",
+        action="store_true",
+        help="Convert crops to grayscale RGB, matching the PCB-YOLO paper's background-color suppression step.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
@@ -151,6 +156,7 @@ def process_split(
     min_visibility: float,
     min_box_size: float,
     negative_ratio: float,
+    grayscale: bool,
     rng: random.Random,
 ) -> dict[str, int]:
     src_image_dir = dataset_root / "images" / split
@@ -169,6 +175,8 @@ def process_split(
 
     for image_path in sorted(src_image_dir.glob("*.jpg")):
         image = Image.open(image_path).convert("RGB")
+        if grayscale:
+            image = image.convert("L").convert("RGB")
         width, height = image.size
         boxes = read_labels(src_label_dir / f"{image_path.stem}.txt", width, height)
         stats["source_images"] += 1
@@ -222,6 +230,7 @@ def main() -> int:
         "slice_size": args.slice_size,
         "overlap": args.overlap,
         "min_visibility": args.min_visibility,
+        "grayscale": args.grayscale,
         "negative_ratio": args.negative_ratio,
         "splits": {},
     }
@@ -235,6 +244,7 @@ def main() -> int:
             args.min_visibility,
             args.min_box_size,
             args.negative_ratio,
+            args.grayscale,
             rng,
         )
     write_yaml(output_root)
