@@ -81,6 +81,39 @@ def write_manifest(save_dir: Path, args: argparse.Namespace, stats: object, dry_
     (save_dir / "pcb_yolo_mvp_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def train_injected_model(model: YOLO, args: argparse.Namespace) -> Path:
+    """Train the already-mutated YOLO torch model without rebuilding it from cfg."""
+    project_dir = Path(args.project).resolve()
+    overrides = {
+        "model": args.model,
+        "data": args.data,
+        "epochs": args.epochs,
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "device": args.device,
+        "workers": args.workers,
+        "seed": args.seed,
+        "project": str(project_dir),
+        "name": args.name,
+        "patience": args.patience,
+        "cache": parse_bool(args.cache),
+        "optimizer": args.optimizer,
+        "lr0": args.lr0,
+        "momentum": args.momentum,
+        "weight_decay": args.weight_decay,
+        "exist_ok": args.exist_ok,
+        "plots": True,
+        "save": True,
+        "val": True,
+    }
+
+    trainer = model._smart_load("trainer")(overrides=overrides, _callbacks=model.callbacks)
+    trainer.model = model.model
+    model.trainer = trainer
+    trainer.train()
+    model.model = trainer.model
+    return Path(trainer.save_dir)
+
 def main() -> int:
     args = parse_args()
     target_names = {item.strip() for item in args.target_csp_names.split(",") if item.strip()}
@@ -99,7 +132,7 @@ def main() -> int:
     print("PCB-YOLO-MVP module replacements:")
     print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))
 
-    planned_save_dir = Path(args.project) / args.name
+    planned_save_dir = Path(args.project).resolve() / args.name
     if args.dry_run:
         write_manifest(planned_save_dir, args, stats, dry_run=True)
         if hasattr(model.model, "info"):
@@ -110,29 +143,7 @@ def main() -> int:
         print(f"Wrote dry-run manifest to: {planned_save_dir / 'pcb_yolo_mvp_manifest.json'}")
         return 0
 
-    model.train(
-        data=args.data,
-        epochs=args.epochs,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        device=args.device,
-        workers=args.workers,
-        seed=args.seed,
-        project=args.project,
-        name=args.name,
-        patience=args.patience,
-        cache=parse_bool(args.cache),
-        optimizer=args.optimizer,
-        lr0=args.lr0,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-        exist_ok=args.exist_ok,
-        plots=True,
-        save=True,
-        val=True,
-    )
-
-    save_dir = Path(getattr(getattr(model, "trainer", None), "save_dir", planned_save_dir))
+    save_dir = train_injected_model(model, args)
     write_manifest(save_dir, args, stats, dry_run=False)
     print(f"Wrote PCB-YOLO-MVP manifest to: {save_dir / 'pcb_yolo_mvp_manifest.json'}")
     return 0
