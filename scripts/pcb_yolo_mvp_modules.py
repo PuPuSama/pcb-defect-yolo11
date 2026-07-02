@@ -205,6 +205,12 @@ def _load_matching_state(dst: nn.Module, src: nn.Module) -> int:
     return len(matched)
 
 
+def _copy_ultralytics_layer_attrs(dst: nn.Module, src: nn.Module) -> None:
+    """Preserve graph metadata that Ultralytics attaches to parsed layers."""
+    for attr in ("i", "f", "type", "np"):
+        if hasattr(src, attr):
+            setattr(dst, attr, getattr(src, attr))
+
 def _replace_children(
     parent: nn.Module,
     stats: ReplacementStats,
@@ -220,7 +226,9 @@ def _replace_children(
         path = f"{prefix}.{name}" if prefix else name
 
         if replace_sws and _is_stride2_conv(child):
-            setattr(parent, name, ConvSWS(child, blocks=sws_blocks, e_lambda=simam_lambda))
+            replacement = ConvSWS(child, blocks=sws_blocks, e_lambda=simam_lambda)
+            _copy_ultralytics_layer_attrs(replacement, child)
+            setattr(parent, name, replacement)
             stats.conv_sws.append(path)
             continue
 
@@ -230,6 +238,7 @@ def _replace_children(
                 replacement = FBC2f(c1, c2, n=n, shortcut=True, e=e, pconv_n_div=pconv_n_div)
                 stats.copied_tensors += _load_matching_state(replacement.cv1, child.cv1)
                 stats.copied_tensors += _load_matching_state(replacement.cv2, child.cv2)
+                _copy_ultralytics_layer_attrs(replacement, child)
                 setattr(parent, name, replacement)
                 stats.fbc2f.append(path)
             except Exception as exc:  # pragma: no cover - defensive for Ultralytics version drift
