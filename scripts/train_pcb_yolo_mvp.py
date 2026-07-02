@@ -47,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.0005)
     parser.add_argument("--exist-ok", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Build the model and write a manifest without training.")
+    parser.add_argument("--no-plots", action="store_true", help="Disable Ultralytics training plots to reduce startup memory.")
+    parser.add_argument("--no-val", action="store_true", help="Disable validation during training; run evaluation separately after training.")
+    parser.add_argument("--no-amp", action="store_true", help="Disable automatic mixed precision if the runtime is unstable.")
 
     parser.add_argument("--no-sws", action="store_true", help="Disable Conv_SWS injection.")
     parser.add_argument("--no-fbc2f", action="store_true", help="Disable FBC2f injection.")
@@ -113,9 +116,10 @@ def train_overrides(args: argparse.Namespace) -> dict[str, object]:
         "momentum": args.momentum,
         "weight_decay": args.weight_decay,
         "exist_ok": args.exist_ok,
-        "plots": True,
+        "plots": not args.no_plots,
         "save": True,
-        "val": True,
+        "val": not args.no_val,
+        "amp": not args.no_amp,
     }
 
 
