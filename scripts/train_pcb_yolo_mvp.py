@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
-from pcb_yolo_mvp_modules import apply_pcb_yolo_mvp
+from pcb_yolo_mvp_modules import ReplacementStats, apply_pcb_yolo_mvp
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def write_manifest(save_dir: Path, args: argparse.Namespace, stats: object, dry_run: bool) -> None:
+def write_manifest(save_dir: Path, args: argparse.Namespace, stats: ReplacementStats, dry_run: bool) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "mvp": "PCB-YOLO-MVP",
@@ -81,10 +81,14 @@ def write_manifest(save_dir: Path, args: argparse.Namespace, stats: object, dry_
     (save_dir / "pcb_yolo_mvp_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def train_injected_model(model: YOLO, args: argparse.Namespace) -> Path:
-    """Train the already-mutated YOLO torch model without rebuilding it from cfg."""
+def print_replacement_stats(stats: ReplacementStats) -> None:
+    print("PCB-YOLO-MVP module replacements:")
+    print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))
+
+
+def train_overrides(args: argparse.Namespace) -> dict[str, object]:
     project_dir = Path(args.project).resolve()
-    overrides = {
+    return {
         "model": args.model,
         "data": args.data,
         "epochs": args.epochs,
@@ -107,33 +111,51 @@ def train_injected_model(model: YOLO, args: argparse.Namespace) -> Path:
         "val": True,
     }
 
-    trainer = model._smart_load("trainer")(overrides=overrides, _callbacks=model.callbacks)
-    trainer.model = model.model
-    model.trainer = trainer
+
+def train_injected_model(args: argparse.Namespace, target_names: set[str]) -> tuple[Path, ReplacementStats]:
+    """Let Ultralytics build the dataset-specific model, then inject MVP modules."""
+    yolo = YOLO(args.model)
+    trainer = yolo._smart_load("trainer")(overrides=train_overrides(args), _callbacks=yolo.callbacks)
+    original_setup_model = trainer.setup_model
+    stats_holder: dict[str, ReplacementStats] = {}
+
+    def setup_model_with_mvp():
+        ckpt = original_setup_model()
+        stats = apply_pcb_yolo_mvp(
+            trainer.model,
+            replace_sws=not args.no_sws,
+            replace_fbc2f=not args.no_fbc2f,
+            sws_blocks=args.sws_blocks,
+            simam_lambda=args.simam_lambda,
+            pconv_n_div=args.pconv_n_div,
+            target_csp_names=target_names,
+        )
+        stats_holder["stats"] = stats
+        print_replacement_stats(stats)
+        return ckpt
+
+    trainer.setup_model = setup_model_with_mvp
     trainer.train()
-    model.model = trainer.model
-    return Path(trainer.save_dir)
+    return Path(trainer.save_dir), stats_holder.get("stats", ReplacementStats())
+
 
 def main() -> int:
     args = parse_args()
     target_names = {item.strip() for item in args.target_csp_names.split(",") if item.strip()}
-
-    model = YOLO(args.model)
-    stats = apply_pcb_yolo_mvp(
-        model,
-        replace_sws=not args.no_sws,
-        replace_fbc2f=not args.no_fbc2f,
-        sws_blocks=args.sws_blocks,
-        simam_lambda=args.simam_lambda,
-        pconv_n_div=args.pconv_n_div,
-        target_csp_names=target_names,
-    )
-
-    print("PCB-YOLO-MVP module replacements:")
-    print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))
-
     planned_save_dir = Path(args.project).resolve() / args.name
+
     if args.dry_run:
+        model = YOLO(args.model)
+        stats = apply_pcb_yolo_mvp(
+            model,
+            replace_sws=not args.no_sws,
+            replace_fbc2f=not args.no_fbc2f,
+            sws_blocks=args.sws_blocks,
+            simam_lambda=args.simam_lambda,
+            pconv_n_div=args.pconv_n_div,
+            target_csp_names=target_names,
+        )
+        print_replacement_stats(stats)
         write_manifest(planned_save_dir, args, stats, dry_run=True)
         if hasattr(model.model, "info"):
             try:
@@ -143,7 +165,7 @@ def main() -> int:
         print(f"Wrote dry-run manifest to: {planned_save_dir / 'pcb_yolo_mvp_manifest.json'}")
         return 0
 
-    save_dir = train_injected_model(model, args)
+    save_dir, stats = train_injected_model(args, target_names)
     write_manifest(save_dir, args, stats, dry_run=False)
     print(f"Wrote PCB-YOLO-MVP manifest to: {save_dir / 'pcb_yolo_mvp_manifest.json'}")
     return 0
